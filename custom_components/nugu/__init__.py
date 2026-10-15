@@ -97,8 +97,11 @@ class NuguDiscoveryView(HomeAssistantView):
             name = state.name or state.entity_id
             devices.append({
                 "id": state.entity_id.replace(".", "_"),
+                "type": "LIGHT",
                 "deviceTypeCode": "LIGHT",
                 "deviceTypeName": "조명",
+                "model": "HA",
+                "modelName": "HA",
                 "deviceModelName": "HA",
                 "friendlyName": name,
                 "friendlyNameSuggestion": name,
