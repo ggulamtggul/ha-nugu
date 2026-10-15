@@ -71,17 +71,31 @@ class NuguActionView(HomeAssistantView):
         _LOGGER.info("Extracted -> location: '%s', device: '%s', action: '%s', temp: '%s'",
                      location, device_type, action_type, temp_val)
 
+        combined_text = f"{location} {device_type} {action_type}"
+
         # 켜기/끄기 판별
-        is_turn_off = any(w in action_type for w in ["꺼", "끄", "중지", "종료", "멈춰", "off", "정지"])
-        is_turn_on = any(w in action_type for w in ["켜", "틀", "시작", "작동", "돌려", "on"]) or not is_turn_off
+        is_turn_off = any(w in combined_text for w in ["꺼", "끄", "중지", "종료", "멈춰", "off", "정지", "소등"])
+        is_turn_on = any(w in combined_text for w in ["켜", "틀", "시작", "작동", "돌려", "on", "점등"]) or not is_turn_off
+
+        # 전체 일괄 제어 여부 판별 (위치나 명령에 '다', '전체', '모두' 포함 시)
+        is_all = any(w in combined_text for w in ["다", "전체", "모두", "전부", "모든", "집안", "일괄"])
 
         # 응답 메시지 초기화
         msg = "명령을 수행했습니다."
         output_data = {k: v for k, v in extracted.items()}
 
         try:
+            # 0. 외출 모드
+            if any(w in combined_text for w in ["외출", "외출모드", "외출 모드"]):
+                for s in self.hass.states.async_all("light"):
+                    await self.hass.services.async_call("light", "turn_off", {"entity_id": s.entity_id}, blocking=True)
+                for s in self.hass.states.async_all("climate"):
+                    if "aircon" in s.entity_id:
+                        await self.hass.services.async_call("climate", "turn_off", {"entity_id": s.entity_id}, blocking=True)
+                msg = "외출 모드를 실행하여 집안 전체 조명과 에어컨을 모두 껐습니다."
+
             # 1. 로봇청소기
-            if any(w in device_type for w in ["청소기", "로봇", "로보킹"]):
+            elif any(w in device_type for w in ["청소기", "로봇", "로보킹"]):
                 if is_turn_off:
                     await self.hass.services.async_call("vacuum", "return_to_base", {}, blocking=True)
                     msg = "로봇청소기를 충전대로 보냈습니다."
@@ -94,7 +108,7 @@ class NuguActionView(HomeAssistantView):
                 target_climates = []
                 for s in self.hass.states.async_all("climate"):
                     if "aircon" in s.entity_id or "에어컨" in (s.name or ""):
-                        if not location or location in (s.name or "") or location in s.entity_id:
+                        if is_all or not location or location in (s.name or "") or location in s.entity_id:
                             target_climates.append(s.entity_id)
 
                 if not target_climates:
@@ -110,17 +124,17 @@ class NuguActionView(HomeAssistantView):
                             pass
                     elif is_turn_off:
                         await self.hass.services.async_call("climate", "turn_off", {"entity_id": c_id}, blocking=True)
-                        msg = "에어컨을 껐습니다."
+                        msg = "모든 에어컨을 껐습니다." if is_all else "에어컨을 껐습니다."
                     else:
                         await self.hass.services.async_call("climate", "turn_on", {"entity_id": c_id}, blocking=True)
-                        msg = "에어컨을 켰습니다."
+                        msg = "모든 에어컨을 켰습니다." if is_all else "에어컨을 켰습니다."
 
             # 3. 난방 / 보일러
             elif any(w in device_type for w in ["난방", "보일러"]):
                 target_heaters = []
                 for s in self.hass.states.async_all("climate"):
                     if "heater" in s.entity_id or "난방" in (s.name or ""):
-                        if not location or location in (s.name or ""):
+                        if is_all or not location or location in (s.name or ""):
                             target_heaters.append(s.entity_id)
 
                 if not target_heaters:
@@ -129,42 +143,43 @@ class NuguActionView(HomeAssistantView):
                 for h_id in target_heaters:
                     if is_turn_off:
                         await self.hass.services.async_call("climate", "set_hvac_mode", {"entity_id": h_id, "hvac_mode": "off"}, blocking=True)
-                        msg = "난방을 껐습니다."
+                        msg = "모든 난방을 껐습니다." if is_all else "난방을 껐습니다."
                     else:
                         await self.hass.services.async_call("climate", "set_hvac_mode", {"entity_id": h_id, "hvac_mode": "heat"}, blocking=True)
-                        msg = "난방을 켰습니다."
+                        msg = "모든 난방을 켰습니다." if is_all else "난방을 켰습니다."
 
             # 4. 조명 (기본값)
             else:
-                loc_map = {
-                    "거실": ["light.room_1_light_1", "light.room_1_light_2"],
-                    "안방": ["light.room_2_light_1"],
-                    "침실": ["light.room_2_light_1"],
-                    "컴퓨터방": ["light.room_3_light_1"],
-                    "서재": ["light.room_3_light_1"],
-                    "끝방": ["light.room_4_light_1"],
-                    "작은방": ["light.room_4_light_1"],
-                    "세탁실": ["light.setagsil_jeondeungseuwici"],
-                    "복도": ["light.room_1_light_4"],
-                    "창가": ["light.room_1_light_3"]
-                }
-                
-                targets = []
-                for k, v in loc_map.items():
-                    if k in location:
-                        targets.extend(v)
-                        break
+                if is_all:
+                    targets = [s.entity_id for s in self.hass.states.async_all("light")]
+                    loc_name = "집안 전체"
+                else:
+                    loc_map = {
+                        "거실": ["light.room_1_light_1", "light.room_1_light_2"],
+                        "안방": ["light.room_2_light_1"],
+                        "침실": ["light.room_2_light_1"],
+                        "컴퓨터방": ["light.room_3_light_1"],
+                        "서재": ["light.room_3_light_1"],
+                        "끝방": ["light.room_4_light_1"],
+                        "작은방": ["light.room_4_light_1"],
+                        "세탁실": ["light.setagsil_jeondeungseuwici"],
+                        "복도": ["light.room_1_light_4"],
+                        "창가": ["light.room_1_light_3"]
+                    }
+                    
+                    targets = []
+                    for k, v in loc_map.items():
+                        if k in location:
+                            targets.extend(v)
+                            break
 
-                if not targets:
-                    if "전체" in location or "모두" in location or "다" in location:
-                        targets = [s.entity_id for s in self.hass.states.async_all("light")]
-                        location = "집안 전체"
-                    else:
+                    if not targets:
                         targets = ["light.room_1_light_1", "light.room_1_light_2"]
                         location = "거실"
 
+                    loc_name = location if location else "거실"
+
                 service = "turn_off" if is_turn_off else "turn_on"
-                loc_name = location if location else "거실"
                 for l_id in targets:
                     await self.hass.services.async_call("light", service, {"entity_id": l_id}, blocking=True)
                 

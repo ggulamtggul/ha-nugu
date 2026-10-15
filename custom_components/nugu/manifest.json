@@ -4,6 +4,6 @@
   "codeowners": ["@ggulamtggul"],
   "documentation": "https://developers.nugu.co.kr",
   "dependencies": ["http"],
-  "version": "1.0.0",
+  "version": "1.3.0",
   "iot_class": "cloud_push"
 }
