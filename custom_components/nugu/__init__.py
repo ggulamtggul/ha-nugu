@@ -13,8 +13,11 @@ async def async_setup(hass: HomeAssistant, config: dict) -> bool:
     _LOGGER.info("Setting up NUGU Integration")
 
     views = [
-        # Custom Play (일반 Play) Backend Proxy 엔드포인트
-        NuguActionView(hass),
+        # Custom Play (일반 Play) Backend Proxy 엔드포인트 (모든 URL 패턴 대응)
+        NuguActionView(hass, "/nugu/action"),
+        NuguActionView(hass, "/nugu/action/{action_name}"),
+        NuguActionView(hass, "/nugu/{action_name}"),
+        NuguActionView(hass, "/{action_name}"),
 
         # Smart Home Pre-built 호환 엔드포인트
         NuguOAuthAuthorizeView(),
@@ -34,22 +37,22 @@ async def async_setup(hass: HomeAssistant, config: dict) -> bool:
 
 class NuguActionView(HomeAssistantView):
     """View to handle Custom Play (일반 Play) requests from NUGU."""
-    url = "/nugu/action"
-    name = "nugu:action"
     requires_auth = False
 
-    def __init__(self, hass: HomeAssistant) -> None:
+    def __init__(self, hass: HomeAssistant, url: str) -> None:
         self.hass = hass
+        self.url = url
+        self.name = f"nugu:action:{url}"
 
-    async def post(self, request: web.Request) -> web.Response:
+    async def post(self, request: web.Request, action_name: str = "") -> web.Response:
         try:
             data = await request.json()
         except Exception:
             data = {}
 
-        _LOGGER.info("NUGU Action Request: %s", data)
+        _LOGGER.info("NUGU Action Request on %s: %s", self.url, data)
         action = data.get("action", {})
-        action_name = action.get("actionName", "")
+        actual_action_name = action.get("actionName", action_name)
         params = action.get("parameters", {})
 
         # 파라미터 값 추출
@@ -155,6 +158,7 @@ class NuguActionView(HomeAssistantView):
                 if not targets:
                     if "전체" in location or "모두" in location or "다" in location:
                         targets = [s.entity_id for s in self.hass.states.async_all("light")]
+                        location = "집안 전체"
                     else:
                         targets = ["light.room_1_light_1", "light.room_1_light_2"]
                         location = "거실"
@@ -187,7 +191,6 @@ class NuguOAuthAuthorizeView(HomeAssistantView):
     url = "/nugu/oauth/authorize"
     name = "nugu:oauth:authorize"
     requires_auth = False
-
     async def get(self, request: web.Request) -> web.Response:
         redirect_uri = request.query.get("redirect_uri", "")
         state = request.query.get("state", "")
