@@ -10,10 +10,10 @@ _LOGGER = logging.getLogger(__name__)
 
 async def async_setup(hass: HomeAssistant, config: dict) -> bool:
     """Set up the NUGU integration."""
-    _LOGGER.info("Setting up NUGU Integration")
+    _LOGGER.info("Setting up NUGU Integration v1.4.0")
 
     views = [
-        # Custom Play (일반 Play) Backend Proxy 엔드포인트 (모든 URL 패턴 대응)
+        # Custom Play (일반 Play) Backend Proxy 엔드포인트
         NuguActionView(hass, "/nugu/action"),
         NuguActionView(hass, "/nugu/action/{action_name}"),
         NuguActionView(hass, "/nugu/{action_name}"),
@@ -24,10 +24,15 @@ async def async_setup(hass: HomeAssistant, config: dict) -> bool:
         NuguOAuthTokenView(),
         NuguDiscoveryView(hass, "/nugu/v1/devices"),
         NuguDiscoveryView(hass, "/v1/devices"),
+        NuguDiscoveryView(hass, "/devices"),
         NuguControlView(hass, "/nugu/v1/capabilities/{capability}/directives/{directive}"),
         NuguControlView(hass, "/v1/capabilities/{capability}/directives/{directive}"),
+        NuguControlView(hass, "/capabilities/{capability}/directives/{directive}"),
+        NuguControlView(hass, "/nugu/v1/control"),
+        NuguControlView(hass, "/v1/control"),
         NuguHealthView("/nugu/v1/health"),
         NuguHealthView("/v1/health"),
+        NuguHealthView("/health"),
     ]
     for view in views:
         hass.http.register_view(view)
@@ -50,7 +55,7 @@ class NuguActionView(HomeAssistantView):
         except Exception:
             data = {}
 
-        _LOGGER.info("NUGU Action Request on %s: %s", self.url, data)
+        _LOGGER.warning("NUGU Action Request on %s: %s", self.url, data)
         action = data.get("action", {})
         actual_action_name = action.get("actionName", action_name)
         params = action.get("parameters", {})
@@ -68,19 +73,15 @@ class NuguActionView(HomeAssistantView):
         action_type = extracted.get("action_type", "").strip()
         temp_val = extracted.get("temperature", "").strip()
 
-        _LOGGER.info("Extracted -> location: '%s', device: '%s', action: '%s', temp: '%s'",
-                     location, device_type, action_type, temp_val)
-
         combined_text = f"{location} {device_type} {action_type}"
 
         # 켜기/끄기 판별
         is_turn_off = any(w in combined_text for w in ["꺼", "끄", "중지", "종료", "멈춰", "off", "정지", "소등"])
         is_turn_on = any(w in combined_text for w in ["켜", "틀", "시작", "작동", "돌려", "on", "점등"]) or not is_turn_off
 
-        # 전체 일괄 제어 여부 판별 (위치나 명령에 '다', '전체', '모두' 포함 시)
+        # 전체 일괄 제어 여부 판별
         is_all = any(w in combined_text for w in ["다", "전체", "모두", "전부", "모든", "집안", "일괄"])
 
-        # 응답 메시지 초기화
         msg = "명령을 수행했습니다."
         output_data = {k: v for k, v in extracted.items()}
 
@@ -148,7 +149,7 @@ class NuguActionView(HomeAssistantView):
                         await self.hass.services.async_call("climate", "set_hvac_mode", {"entity_id": h_id, "hvac_mode": "heat"}, blocking=True)
                         msg = "모든 난방을 켰습니다." if is_all else "난방을 켰습니다."
 
-            # 4. 조명 (기본값)
+            # 4. 조명
             else:
                 if is_all:
                     targets = [s.entity_id for s in self.hass.states.async_all("light")]
@@ -166,17 +167,14 @@ class NuguActionView(HomeAssistantView):
                         "복도": ["light.room_1_light_4"],
                         "창가": ["light.room_1_light_3"]
                     }
-                    
                     targets = []
                     for k, v in loc_map.items():
                         if k in location:
                             targets.extend(v)
                             break
-
                     if not targets:
                         targets = ["light.room_1_light_1", "light.room_1_light_2"]
                         location = "거실"
-
                     loc_name = location if location else "거실"
 
                 service = "turn_off" if is_turn_off else "turn_on"
@@ -191,14 +189,7 @@ class NuguActionView(HomeAssistantView):
             msg = "장치 제어 중 오류가 발생했습니다."
 
         output_data["message"] = msg
-
-        response_body = {
-            "version": "2.0",
-            "resultCode": "OK",
-            "output": output_data
-        }
-        _LOGGER.info("NUGU Action Response: %s", response_body)
-        return web.json_response(response_body)
+        return web.json_response({"version": "2.0", "resultCode": "OK", "output": output_data})
 
 
 # --- 이하 스마트홈 호환 뷰 ---
@@ -207,18 +198,27 @@ class NuguOAuthAuthorizeView(HomeAssistantView):
     name = "nugu:oauth:authorize"
     requires_auth = False
     async def get(self, request: web.Request) -> web.Response:
+        _LOGGER.warning("NUGU OAuth Authorize query: %s", request.query)
         redirect_uri = request.query.get("redirect_uri", "")
         state = request.query.get("state", "")
         callback_url = f"{redirect_uri}?code=nugu_success_code&state={state}"
         html = f"""<!DOCTYPE html><html><head><meta charset="utf-8"><script>window.location.href="{callback_url}";</script></head><body><p>연동 완료</p></body></html>"""
         return web.Response(text=html, content_type="text/html")
 
+
 class NuguOAuthTokenView(HomeAssistantView):
     url = "/nugu/oauth/token"
     name = "nugu:oauth:token"
     requires_auth = False
     async def post(self, request: web.Request) -> web.Response:
-        return web.json_response({"access_token": "ha_nugu_token_2026", "token_type": "Bearer", "expires_in": 315360000, "refresh_token": "ha_nugu_refresh_token_2026"})
+        _LOGGER.warning("NUGU OAuth Token request")
+        return web.json_response({
+            "access_token": "ha_nugu_token_2026",
+            "token_type": "Bearer",
+            "expires_in": 315360000,
+            "refresh_token": "ha_nugu_refresh_token_2026"
+        })
+
 
 class NuguDiscoveryView(HomeAssistantView):
     requires_auth = False
@@ -226,11 +226,28 @@ class NuguDiscoveryView(HomeAssistantView):
         self.hass = hass
         self.url = url
         self.name = f"nugu:discovery:{url}"
+
     async def post(self, request: web.Request) -> web.Response:
+        try:
+            body = await request.json()
+        except Exception:
+            body = {}
+        _LOGGER.warning("NUGU Discovery on %s: %s", self.url, body)
         devices = []
         for state in self.hass.states.async_all("light"):
-            devices.append({"id": state.entity_id.replace(".", "_"), "deviceTypeCode": "LIGHT", "deviceTypeName": "조명", "deviceModelName": "HA", "friendlyNameSuggestion": state.name or state.entity_id, "manufacturer": "HA", "supportedCapabilities": {"powerControl": {}}, "customData": {"entity_id": state.entity_id, "domain": "light"}, "connectionStatus": state.state != "unavailable"})
+            devices.append({
+                "id": state.entity_id.replace(".", "_"),
+                "deviceTypeCode": "LIGHT",
+                "deviceTypeName": "조명",
+                "deviceModelName": "HA",
+                "friendlyNameSuggestion": state.name or state.entity_id,
+                "manufacturer": "HA",
+                "supportedCapabilities": {"powerControl": {}},
+                "customData": {"entity_id": state.entity_id, "domain": "light"},
+                "connectionStatus": state.state != "unavailable"
+            })
         return web.json_response({"devices": devices})
+
 
 class NuguControlView(HomeAssistantView):
     requires_auth = False
@@ -238,15 +255,57 @@ class NuguControlView(HomeAssistantView):
         self.hass = hass
         self.url = url
         self.name = f"nugu:control:{url}"
-    async def post(self, request: web.Request, capability: str, directive: str) -> web.Response:
-        data = await request.json()
+
+    async def post(self, request: web.Request, capability: str = "", directive: str = "") -> web.Response:
+        try:
+            data = await request.json()
+        except Exception:
+            data = {}
+
+        _LOGGER.warning("NUGU Control Request on %s: cap=%s, dir=%s, data=%s", self.url, capability, directive, data)
+
         req_id = data.get("requestId", "")
-        device = data.get("device", {})
-        entity_id = device.get("customData", {}).get("entity_id") or device.get("id", "").replace("_", ".", 1)
-        domain = device.get("customData", {}).get("domain") or entity_id.split(".")[0]
-        service = "turn_on" if directive == "TurnOn" else "turn_off"
-        await self.hass.services.async_call(domain, service, {"entity_id": entity_id}, blocking=True)
-        return web.json_response({"requestId": req_id, "data": [{"resultCode": "OK", "smartHomeDevice": device}]})
+        action = data.get("action", {})
+        command = action.get("command", {}) if isinstance(action, dict) else {}
+
+        # Directive 추출 (URL 파라미터 또는 Body 내 command)
+        actual_directive = directive or command.get("smartHomeDirective", "")
+        dir_lower = str(actual_directive).lower()
+        is_off = any(w in dir_lower for w in ["turnoff", "off", "꺼", "소등", "stop", "close"])
+
+        # 타겟 디바이스 목록 추출 (NUGU 스마트홈 규격: action.smartHomeDevices)
+        target_devices = []
+        if isinstance(action, dict) and "smartHomeDevices" in action:
+            target_devices = action.get("smartHomeDevices") or []
+        elif "device" in data:
+            target_devices = [data["device"]]
+        elif "smartHomeDevice" in data:
+            target_devices = [data["smartHomeDevice"]]
+
+        results = []
+        for dev in target_devices:
+            if not isinstance(dev, dict):
+                continue
+            custom = dev.get("customData", {})
+            entity_id = custom.get("entity_id") or dev.get("id", "").replace("_", ".", 1)
+            domain = custom.get("domain") or (entity_id.split(".")[0] if "." in entity_id else "light")
+            service = "turn_off" if is_off else "turn_on"
+
+            try:
+                _LOGGER.warning("NUGU executing: %s.%s on %s", domain, service, entity_id)
+                await self.hass.services.async_call(domain, service, {"entity_id": entity_id}, blocking=True)
+                results.append({"resultCode": "OK", "smartHomeDevice": dev})
+            except Exception as e:
+                _LOGGER.error("Failed to control %s: %s", entity_id, e)
+                results.append({"resultCode": "DeviceControlFailed", "smartHomeDevice": dev})
+
+        if not results:
+            results = [{"resultCode": "OK"}]
+
+        resp = {"requestId": req_id, "data": results}
+        _LOGGER.warning("NUGU Control Response: %s", resp)
+        return web.json_response(resp)
+
 
 class NuguHealthView(HomeAssistantView):
     requires_auth = False
