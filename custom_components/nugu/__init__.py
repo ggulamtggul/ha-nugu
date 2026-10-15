@@ -69,7 +69,7 @@ class NuguActionView(HomeAssistantView):
         except Exception:
             data = {}
 
-        _LOGGER.info("NUGU Custom Action Request on %s: %s", self.url, data)
+        _LOGGER.warning("NUGU Custom Action Request on %s: %s", self.url, data)
         action = data.get("action", {})
         params = action.get("parameters", {})
 
@@ -148,7 +148,7 @@ class NuguOAuthAuthorizeView(HomeAssistantView):
         self.name = f"nugu:oauth:authorize:{url}"
 
     async def get(self, request: web.Request) -> web.Response:
-        _LOGGER.info("NUGU OAuth Authorize query: %s", request.query)
+        _LOGGER.warning("NUGU OAuth Authorize query: %s", request.query)
         redirect_uri = request.query.get("redirect_uri", "")
         state = request.query.get("state", "")
 
@@ -157,7 +157,7 @@ class NuguOAuthAuthorizeView(HomeAssistantView):
 
         sep = "&" if "?" in redirect_uri else "?"
         callback_url = f"{redirect_uri}{sep}code=nugu_auth_code_2026&state={state}"
-        _LOGGER.info("Redirecting OAuth client (302 Found) to: %s", callback_url)
+        _LOGGER.warning("Redirecting OAuth client (302 Found) to: %s", callback_url)
         raise web.HTTPFound(location=callback_url)
 
 
@@ -170,7 +170,7 @@ class NuguOAuthTokenView(HomeAssistantView):
         self.name = f"nugu:oauth:token:{url}"
 
     async def post(self, request: web.Request) -> web.Response:
-        _LOGGER.info("NUGU OAuth Token exchange request")
+        _LOGGER.warning("NUGU OAuth Token exchange request")
         return web.json_response({
             "access_token": "nugu_token_2026_lights",
             "token_type": "Bearer",
@@ -193,7 +193,7 @@ class NuguDiscoveryView(HomeAssistantView):
             body = await request.json()
         except Exception:
             body = {}
-        _LOGGER.info("NUGU Discovery request on %s: %s", self.url, body)
+        _LOGGER.warning("NUGU Discovery request on %s: %s", self.url, body)
 
         # 오직 조명(LIGHT) 도메인만 엄격히 조회 및 규격 일치화
         devices = []
@@ -220,7 +220,7 @@ class NuguDiscoveryView(HomeAssistantView):
                 "connectionStatus": state.state != "unavailable"
             })
 
-        _LOGGER.info("Discovered %d lights for NUGU SmartHome", len(devices))
+        _LOGGER.warning("Discovered %d lights for NUGU SmartHome", len(devices))
         return web.json_response({"devices": devices})
 
 
@@ -239,7 +239,7 @@ class NuguControlView(HomeAssistantView):
         except Exception:
             data = {}
 
-        _LOGGER.info("NUGU Control Request on %s: cap=%s, dir=%s, body=%s", self.url, capability, directive, data)
+        _LOGGER.warning("NUGU Control Request on %s: cap=%s, dir=%s, body=%s", self.url, capability, directive, data)
 
         req_id = data.get("requestId", "")
         action = data.get("action", {})
@@ -301,7 +301,7 @@ class NuguControlView(HomeAssistantView):
 
             # 3. AlreadyTurnOn / AlreadyTurnOff 확인
             if not is_off and current_state.state == "on":
-                _LOGGER.info("Device %s is already turned on", entity_id)
+                _LOGGER.warning("Device %s is already turned on", entity_id)
                 results.append({
                     "resultCode": "AlreadyTurnOn",
                     "smartHomeDevice": dev,
@@ -310,7 +310,7 @@ class NuguControlView(HomeAssistantView):
                 continue
 
             if is_off and current_state.state == "off":
-                _LOGGER.info("Device %s is already turned off", entity_id)
+                _LOGGER.warning("Device %s is already turned off", entity_id)
                 results.append({
                     "resultCode": "AlreadyTurnOff",
                     "smartHomeDevice": dev,
@@ -321,7 +321,7 @@ class NuguControlView(HomeAssistantView):
             # 4. 실제 제어 실행
             service = "turn_off" if is_off else "turn_on"
             try:
-                _LOGGER.info("Executing light.%s on %s", service, entity_id)
+                _LOGGER.warning("Executing light.%s on %s", service, entity_id)
                 await self.hass.services.async_call("light", service, {"entity_id": entity_id}, blocking=True)
                 results.append({
                     "resultCode": "OK",
@@ -343,7 +343,7 @@ class NuguControlView(HomeAssistantView):
             "requestId": req_id,
             "data": results
         }
-        _LOGGER.info("NUGU Control Response: %s", response_payload)
+        _LOGGER.warning("NUGU Control Response: %s", response_payload)
         return web.json_response(response_payload)
 
 
