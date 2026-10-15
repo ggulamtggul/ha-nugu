@@ -94,12 +94,14 @@ class NuguDiscoveryView(HomeAssistantView):
         _LOGGER.warning("NUGU Discovery on %s: %s", self.url, body)
         devices = []
         for state in self.hass.states.async_all("light"):
+            name = state.name or state.entity_id
             devices.append({
                 "id": state.entity_id.replace(".", "_"),
                 "deviceTypeCode": "LIGHT",
                 "deviceTypeName": "조명",
                 "deviceModelName": "HA",
-                "friendlyNameSuggestion": state.name or state.entity_id,
+                "friendlyName": name,
+                "friendlyNameSuggestion": name,
                 "manufacturer": "HA",
                 "supportedCapabilities": {"powerControl": {}},
                 "customData": {"entity_id": state.entity_id, "domain": "light"},
