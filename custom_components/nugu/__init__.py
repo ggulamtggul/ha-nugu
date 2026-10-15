@@ -168,7 +168,12 @@ class NuguControlView(HomeAssistantView):
         if not results:
             results = [{"resultCode": "OK"}]
 
-        resp = {"requestId": req_id, "data": results}
+        resp = {
+            "resultCode": "OK",
+            "requestId": req_id,
+            "parameters": {},
+            "data": results
+        }
         _LOGGER.warning("NUGU Control Response: %s", resp)
         return web.json_response(resp)
 
